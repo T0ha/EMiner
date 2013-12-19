@@ -15,7 +15,7 @@
          terminate/3,
          code_change/4]).
 
--record(state, {target, block, host, port, user, pass, result, range}).
+-record(state, {request, target, block, host, port, user, pass, result, range}).
 
 %%%===================================================================
 %%% API
@@ -68,10 +68,13 @@ init([Host, Port, User, Pass, Start, Stop]) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
+working(stop, State) ->
+            {next_state, done, State, 0};
 working(timeout, #state{block=Data, target=Target, range={Start, Stop}} = State) ->
     error_logger:info_msg("Working on: ~p start ~p~n", [Data, now()]),
     case brute(Data, Target, Start, Stop) of
         {result, Result} ->
+            error_logger:info_msg("Finished result ~p ~n", [Result]),
             {next_state, done, State#state{result=Result}, 0};
         empty ->
             error_logger:info_msg("Finished empty~p ~n", [now()]),
@@ -96,19 +99,24 @@ working(timeout, #state{block=Data, target=Target, range={Start, Stop}} = State)
 %%                   {stop, Reason, Reply, NewState}
 %% @end
 %%--------------------------------------------------------------------
-done(timeout, #state{host=Host, port=Port, user=User, pass=Pass, result=Result, range={Start, Stop}} = State) ->
-    io:format("~p ~p~n", [Start, Stop]),
+done(timeout, #state{host=Host, port=Port, user=User, pass=Pass, block=Block, result=Result, range={Start, Stop}, request=Request} = State) ->
     Params = case Result of
         undefined ->
             "{\"method\": \"getwork\", \"id\": \"json\", \"params\": null}";
         Result ->
-            "{\"method\": \"getwork\", \"id\": \"json\", \"params\": [\"" ++ list_to_binary(bin_to_hex(Result)) ++ "\"]}"
+            DataN = <<(bin_to_hex(reverse(<<Block/bytes, Result:32/integer>>)))/bytes, (binary:copy(<<"0">>, 88))/bytes, "80020000">>,
+            "[\"" ++ binary_to_list(DataN) ++ "\"]"
+            %error_logger:info_msg("Result ~p~n", [DataN]),
+            %ResN = [{<<"data">>, DataN} | proplists:delete(<<"data">>, Request)],
+           % mochijson2:encode({struct, [{<<"method">>, <<"getwork">>},
+           %                             {<<"id">>, <<"json">>},
+           %                             {<<"params">>, {struct, ResN}}]})
     end,
     URI = "http://" ++ Host ++ ":" ++ integer_to_list(Port),
-    error_logger:info_msg("URI: ~p~n", [URI]),
-            {ok, {{_, 200, _}, _, JSON}} = httpc:request(post, {URI,
+    {ok, {{_, 200, _}, _, JSON}} = Req =  httpc:request(post, {URI,
                                                         [{"Authorization","Basic " ++ base64:encode_to_string(User ++ ":" ++ Pass)}, 
-                                                         {"X-Mining-Extensions", "hotlist"}], 
+                                                         {"X-Mining-Extensions", "noncerange hotlist"}], 
+                                                         %{"X-Mining-Hashrate", 1000000}], 
                                                         "application/json", 
                                                         Params}, [],[]),
     case mochijson2:decode(JSON) of
@@ -117,16 +125,17 @@ done(timeout, #state{host=Host, port=Port, user=User, pass=Pass, result=Result, 
                   {<<"error">>, null},
                   {<<"id">>, <<"json">>}
                  ]} ->
-            error_logger:info_msg("Request: ~p~n", [Res]),
             <<Data:152/bytes, _/bytes>> = proplists:get_value(<<"data">>, Res),
             <<Target:256/little-integer>> = hex_to_bin(proplists:get_value(<<"target">>, Res)),
+            %Target = binary:decode_unsigned(<< <<255>> || _ <- lists:seq(0, 31)>>),
             error_logger:info_msg("Got work: ~p target ~p~n", [Data , integer_to_list(Target, 16)]),
             DataB = hex_to_bin(Data),
-            {next_state, working, State#state{target=Target, block=reverse(DataB)}, 0};
+            {next_state, working, State#state{request=Res, target=Target, block=reverse(DataB)}, 0};
         {struct, [{<<"result">>, _}, 
                   {<<"error">>, Err},
                   {<<"id">>, <<"json">>}
                  ]} ->
+            error_logger:warning_msg("Request: ~p~n", [Req]),
             error_logger:warning_msg("Error recieved from pool: ~p", [Err]),
             {next_state, done, State, 0}
     end.
@@ -219,14 +228,14 @@ brute(_, _, N, S) when N >= S ->
     empty;
 brute(Data, Target, N, S) ->
     Cur = <<Data/bytes, N:32/integer>>,
-    case crypto:hash(sha256, crypto:hash(sha256, Cur )) of
+    case binary:decode_unsigned(crypto:hash(sha256, crypto:hash(sha256, Cur ))) of
         R when R =< Target ->
-            {result, Cur};
+            {result, N};
         _R ->
-            brute(Data, Target, N - 1, S)
+            brute(Data, Target, N + 1, S)
     end.
 hex_to_bin(Data) ->
     << <<(list_to_integer(binary_to_list(D), 16))/integer>> || <<D:2/bytes>> <= Data>>.
 
 bin_to_hex(Data) ->
-    << <<(integer_to_binary(D, 16))>> || <<D/integer>> <= Data>>.
+    list_to_binary(lists:flatten([io_lib:format("~2.16.0b", [B]) || <<B>> <= Data])).

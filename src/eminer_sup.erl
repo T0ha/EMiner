@@ -21,7 +21,7 @@ start_link(Host, Port, User, Pass) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, [Host, Port, User, Pass]).
 start(N) ->
     lists:foreach(fun(C) ->
-                supervisor:start_child(?MODULE, [trunc((C-1) * (16#ffffffff/N)), trunc(C * (16#ffffffff/N))])
+                supervisor:start_child(?MODULE, [trunc((C-1) * (16#2ffffff/N)), trunc(C * (16#2ffffff/N))])
         end, lists:seq(1, N)).
 
 %% ===================================================================
