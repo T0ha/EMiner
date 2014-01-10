@@ -72,13 +72,13 @@ init([Host, Port, User, Pass, Start, Stop]) ->
 working(stop, State) ->
             {next_state, get_work, State, 0};
 working(timeout, #state{block=Data, target=Target, range={Start, Stop}} = State) ->
-    error_logger:info_msg("Working on: ~p start ~p~n", [Data, now()]),
+    %error_logger:info_msg("Working on: ~p start ~p~n", [Data, now()]),
     case brute(Data, Target, Start, Stop) of
         {result, Result} ->
             error_logger:info_msg("Finished result ~p ~n", [Result]),
             {next_state, done, State#state{result=Result}, 0};
         empty ->
-            error_logger:info_msg("Finished empty~p ~n", [now()]),
+            %error_logger:info_msg("Finished empty~p ~n", [now()]),
             {next_state, get_work, State, 0}
     end.
 
@@ -101,7 +101,7 @@ working(timeout, #state{block=Data, target=Target, range={Start, Stop}} = State)
 %% @end
 %%--------------------------------------------------------------------
 done(timeout, #state{host=Host, port=Port, user=User, pass=Pass, block=Block, result=Result} = State) ->
-    DataN = <<(bin_to_hex(reverse(<<Block/bytes, Result:32/integer>>)))/bytes, "8", (binary:copy(<<"0">>, 87))/bytes, "80020000">>,
+    DataN = <<(bin_to_hex(reverse(<<Block/bytes, Result:32/integer>>)))/bytes, "00000080", (binary:copy(<<"0">>, 80))/bytes, "80020000">>,
     Re = binary_to_list(DataN),
     Params = "{\"method\": \"getwork\", \"id\": \"json\", \"params\": [\""++ Re ++"\"]}",
     error_logger:info_msg("Result ~p~n", [Params]),
@@ -130,10 +130,10 @@ get_work(timeout, #state{host=Host, port=Port, user=User, pass=Pass, range={Star
                   {<<"error">>, null},
                   {<<"id">>, <<"json">>}
                  ]} ->
-            <<Data:152/bytes, _/bytes>> = proplists:get_value(<<"data">>, Res),
+            <<Data:152/bytes, _/bytes>> = D = proplists:get_value(<<"data">>, Res),
             <<Target:256/little-integer>> = hex_to_bin(proplists:get_value(<<"target">>, Res)),
             %Target = binary:decode_unsigned(<< <<255>> || _ <- lists:seq(0, 31)>>),
-            %error_logger:info_msg("Got work: ~p target ~p~n", [Data , integer_to_list(Target, 16)]),
+            error_logger:info_msg("Got work: ~p target ~p~n", [D , integer_to_list(Target, 16)]),
             DataB = hex_to_bin(Data),
             {next_state, working, State#state{request=Res, target=Target, block=reverse(DataB)}, 0};
         Err ->
