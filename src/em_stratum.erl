@@ -13,7 +13,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, {id, difficulty=1, socket, login, passwd}).
+-record(state, {id, difficulty=1, socket, login, passwd, extranonce, extra2len}).
 
 %%%===================================================================
 %%% API
@@ -27,7 +27,7 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link(Address, Port, Login, Passwd) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [Address, Port, Login, Passwd], []).
+    gen_server:start_link({local, protocol}, ?MODULE, [Address, Port, Login, Passwd], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -77,6 +77,10 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_cast({found, JID, Nonce, NTime}, #state{socket=Sock, extra2len=Extra2len, login=Login, id=Id} = State) ->
+    error_logger:info_msg("Found block: ~p for jid ~p~n", [Nonce, JID]),
+    gen_tcp:send(Sock, "{\"method\":\"mining.submit\", \"id\":" ++ io_lib:format("~b", [Id]) ++ ", \"params\": [\"" ++ Login ++ "\", \"" ++ binary_to_list(JID) ++ "\", \"" ++ lists:flatten(lists:duplicate(Extra2len - 1, "00") ++ "01") ++ "\", \"" ++ binary_to_list(NTime) ++ "\", \"" ++ binary_to_list(em_utils:bin_to_hex(<<Nonce:32/big-integer>>)) ++ "\"]}\n"),
+    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -98,28 +102,29 @@ handle_info({tcp, Sock, Data}, #state{socket=Sock, id=1, login=Login, passwd=Pas
                   {<<"result">>, Res} 
                  ]} ->
             error_logger:info_msg("Got subscribe answer: ~p~n", [Res]),
+            [_, Extranonce1, Extra2len] = Res,
             gen_tcp:send(Sock, "{\"id\": 2, \"method\": \"mining.authorize\", \"params\":[\"" ++ Login ++ "\",\"" ++ Passwd ++ "\"]}\n"),
-            {noreply, State#state{id=2}};
+            {noreply, State#state{id=2, extranonce=Extranonce1, extra2len=Extra2len}};
         Any ->
             error_logger:info_msg("Got subscribe unexpected answer: ~p~n", [Any]),
             {stop, "wrong answer", State}
     end;
-handle_info({tcp, Sock, Data}, #state{socket=Sock, id=Id, difficulty=Diff} = State) ->
+handle_info({tcp, Sock, Data}, #state{socket=Sock, id=Id} = State) ->
     case mochijson2:decode(Data) of
         {struct, [
                   {<<"error">>, null},
                   {<<"id">>, Id},
                   {<<"result">>, Res} 
                  ]} ->
-            error_logger:info_msg("Got data: ~p with id ~p~n", [Res, Id]),
+            %error_logger:info_msg("Got data: ~p with id ~p~n", [Res, Id]),
             {noreply, State#state{id=Id+1}};
         {struct, [
                   {<<"params">>, Params},
                   {<<"id">>, null},
                   {<<"method">>, Method} 
                  ]} ->
-            error_logger:info_msg("Got method: ~p with paarams ~p~n", [Method, Params]),
-            {noreply, State#state{id=Id}};
+            %error_logger:info_msg("Got method: ~p with paarams ~p~n", [Method, Params]),
+            call_method(Method, Params, State);
         Any ->
             error_logger:warning_msg("Got unexpected answer: ~p~n", [Any]),
             {stop, "wrong answer", State}
@@ -155,3 +160,18 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+call_method(<<"mining.set_difficulty">>, [Diff], State) ->
+    CDiff = 16#00000000FFFF0000000000000000000000000000000000000000000000000000 div Diff,
+    BTarget = <<CDiff:256/integer>>,
+    error_logger:info_msg("Target set to ~p for difficulty ~p~n", [BTarget, Diff]),
+    {noreply, State#state{difficulty=CDiff}};
+call_method(<<"mining.notify">>, 
+            [
+             JID, PrevHash, Coinb1, Coinb2, MercleBranch, Version, NBits, NTime, Clean
+            ], #state{extranonce=Extranonce1, extra2len=Extra2len, difficulty=Target} = State) ->
+    %error_logger:info_msg("~p",[<<Version/bytes, PrevHash/bytes, (em_utils:bin_to_hex(MercleRoot))/bytes, NTime/bytes, Nbits/bytes>>]),
+    em_worker_sup:stop(Clean),
+    em_worker_sup:start_mining(JID, em_utils:reverse(em_utils:hex_to_bin(em_utils:build_block(Version, PrevHash, Coinb1, Coinb2, Extranonce1, Extra2len, MercleBranch, NBits, NTime))), Target, NTime),
+    {noreply, State};
+call_method(_, _, State) ->
+    {noreply, State}.

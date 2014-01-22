@@ -3,20 +3,18 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/6]).
+-export([start_link/4]).
 
 %% gen_fsm callbacks
 -export([init/1,
-         get_work/2,
          working/2,
-         done/2,
          handle_event/3,
          handle_sync_event/4,
          handle_info/3,
          terminate/3,
          code_change/4]).
 
--record(state, {request, target, block, host, port, user, pass, result, range}).
+-record(state, {jid, block, nonce, target, ntime}).
 
 %%%===================================================================
 %%% API
@@ -31,8 +29,8 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(Host, Port, User, Pass, Start, Stop) ->
-    gen_fsm:start_link( ?MODULE, [Host, Port, User, Pass, Start, Stop], []).
+start_link(JID, Block, Target, NTime) ->
+    gen_fsm:start_link( ?MODULE, [JID, Block, Target, NTime], []).
 
 %%%===================================================================
 %%% gen_fsm callbacks
@@ -51,8 +49,8 @@ start_link(Host, Port, User, Pass, Start, Stop) ->
 %%                     {stop, StopReason}
 %% @end
 %%--------------------------------------------------------------------
-init([Host, Port, User, Pass, Start, Stop]) ->
-    {ok, get_work, #state{host=Host, port=Port, user=User, pass=Pass, range={Start, Stop}}, 0}.
+init([JID, Block, Target, NTime]) ->
+    {ok, working, #state{jid=JID, block=Block, nonce = 0, target=Target, ntime=NTime}, 0}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -69,77 +67,18 @@ init([Host, Port, User, Pass, Start, Stop]) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-working(stop, State) ->
-            {next_state, get_work, State, 0};
-working(timeout, #state{block=Data, target=Target, range={Start, Stop}} = State) ->
+working(timeout, #state{block=Data, target=Target, nonce=Nonce, ntime=NTime, jid=JID} = State) ->
     %error_logger:info_msg("Working on: ~p start ~p~n", [Data, now()]),
-    case brute(Data, Target, Start, Stop) of
-        {result, Result} ->
-            error_logger:info_msg("Finished result ~p ~n", [Result]),
-            {next_state, done, State#state{result=Result}, 0};
+    case brute(Data, Target, Nonce) of
+        {result, Result, Hash} ->
+            error_logger:info_msg("Finished result ~p ~p~n", [Result, Hash]),
+            em_protocol_sup:found(JID, Result, NTime),
+            {stop, done, State};
         empty ->
             %error_logger:info_msg("Finished empty~p ~n", [now()]),
-            {next_state, get_work, State, 0}
+            {stop, done, State}
     end.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% There should be one instance of this function for each possible
-%% state name. Whenever a gen_fsm receives an event sent using
-%% gen_fsm:sync_send_event/[2,3], the instance of this function with
-%% the same name as the current state name StateName is called to
-%% handle the event.
-%%
-%% @spec state_name(Event, From, State) ->
-%%                   {next_state, NextStateName, NextState} |
-%%                   {next_state, NextStateName, NextState, Timeout} |
-%%                   {reply, Reply, NextStateName, NextState} |
-%%                   {reply, Reply, NextStateName, NextState, Timeout} |
-%%                   {stop, Reason, NewState} |
-%%                   {stop, Reason, Reply, NewState}
-%% @end
-%%--------------------------------------------------------------------
-done(timeout, #state{host=Host, port=Port, user=User, pass=Pass, block=Block, result=Result} = State) ->
-    DataN = <<(bin_to_hex(reverse(<<Block/bytes, Result:32/integer>>)))/bytes, "00000080", (binary:copy(<<"0">>, 80))/bytes, "80020000">>,
-    Re = binary_to_list(DataN),
-    Params = "{\"method\": \"getwork\", \"id\": \"json\", \"params\": [\""++ Re ++"\"]}",
-    error_logger:info_msg("Result ~p~n", [Params]),
-    JSON = request(Host, Port, User, Pass, Params),
-
-    case mochijson2:decode(JSON) of
-        %{struct, [{<<"result">>, 
-        %           {struct, Res}}, 
-        %          {<<"error">>, null},
-        %          {<<"id">>, <<"json">>}
-        %         ]} ->
-        %    error_logger:info_msg("~p~n",[Res]),
-        %    {next_state, get_work, State#state{result=undefined}, 0};
-        Err ->
-            error_logger:info_msg("~p~n",[Err]),
-            {next_state, get_work, State#state{result=undefined}, 0}
-    end.
-
-get_work(timeout, #state{host=Host, port=Port, user=User, pass=Pass, range={Start, Stop}} = State) ->
-    Params = "{\"method\": \"getwork\", \"id\": \"json\", \"params\": null}",
-    error_logger:info_msg("Result ~p~n", [Params]),
-    JSON = request(Host, Port, User, Pass, Params),
-    case mochijson2:decode(JSON) of
-        {struct, [{<<"result">>, 
-                   {struct, Res}}, 
-                  {<<"error">>, null},
-                  {<<"id">>, <<"json">>}
-                 ]} ->
-            <<Data:152/bytes, _/bytes>> = D = proplists:get_value(<<"data">>, Res),
-            <<Target:256/little-integer>> = hex_to_bin(proplists:get_value(<<"target">>, Res)),
-            %Target = binary:decode_unsigned(<< <<255>> || _ <- lists:seq(0, 31)>>),
-            error_logger:info_msg("Got work: ~p target ~p~n", [D , integer_to_list(Target, 16)]),
-            DataB = hex_to_bin(Data),
-            {next_state, working, State#state{request=Res, target=Target, block=reverse(DataB)}, 0};
-        Err ->
-            error_logger:warning_msg("Error recieved from pool: ~p", [Err]),
-            {next_state, get_work, State, 0}
-    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -222,31 +161,16 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-reverse(Data) ->
-    << <<D:32/big>> || <<D:32/little>> <= Data>>.
 
-brute(_, _, N, S) when N >= S ->
+brute(_Data, _Target, Nonce) when Nonce > 16#ffffffff ->
     empty;
-brute(Data, Target, N, S) ->
-    Cur = <<Data/bytes, N:32/integer>>,
-    case binary:decode_unsigned(crypto:hash(sha256, crypto:hash(sha256, Cur ))) of
+brute(Data, Target, Nonce) when Nonce < 16#ffffffff ->
+    Cur = <<Data/bytes, Nonce:32/little-integer>>,
+	<<BHash:256/little-integer>> = crypto:hash(sha256, crypto:hash(sha256, Cur )),
+    case BHash of
         R when R =< Target ->
-            {result, N};
+            error_logger:info_msg("R: ~p~n   ~p~n",[R, Target]),
+            {result, Nonce, BHash};
         _R ->
-            brute(Data, Target, N + 1, S)
+            brute(Data, Target, Nonce + 1)
     end.
-hex_to_bin(Data) ->
-    << <<(list_to_integer(binary_to_list(D), 16))/integer>> || <<D:2/bytes>> <= Data>>.
-
-bin_to_hex(Data) ->
-    list_to_binary(lists:flatten([io_lib:format("~2.16.0b", [B]) || <<B>> <= Data])).
-
-request(Host, Port, User, Pass, Params) ->
-    URI = "http://" ++ Host ++ ":" ++ integer_to_list(Port),
-    {ok, {{_, 200, _}, _, JSON}} = Req =  httpc:request(post, {URI,
-                                                        [{"Authorization","Basic " ++ base64:encode_to_string(User ++ ":" ++ Pass)}, 
-                                                         {"X-Mining-Extensions", "noncerange hotlist"}], 
-                                                         %{"X-Mining-Hashrate", 1000000}], 
-                                                        "application/json", 
-                                                        Params}, [],[]),
-    JSON.

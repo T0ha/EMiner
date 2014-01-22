@@ -1,4 +1,5 @@
 *.beam
 *.log
-ebin/*
-deps/*
+ebin
+deps
+
