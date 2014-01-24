@@ -164,7 +164,7 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 
 brute(_Data, _Target, Nonce) when Nonce > 16#ffffffff ->
     empty;
-brute(Data, Target, Nonce) when Nonce < 16#ffffffff ->
+brute(Data, Target, Nonce) when Nonce =< 16#ffffffff ->
     Cur = <<Data/bytes, Nonce:32/little-integer>>,
 	<<BHash:256/little-integer>> = crypto:hash(sha256, crypto:hash(sha256, Cur )),
     case BHash of

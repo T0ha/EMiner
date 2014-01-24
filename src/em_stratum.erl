@@ -116,14 +116,14 @@ handle_info({tcp, Sock, Data}, #state{socket=Sock, id=Id} = State) ->
                   {<<"id">>, Id},
                   {<<"result">>, Res} 
                  ]} ->
-            %error_logger:info_msg("Got data: ~p with id ~p~n", [Res, Id]),
+            error_logger:info_msg("Got data: ~p with id ~p~n", [Res, Id]),
             {noreply, State#state{id=Id+1}};
         {struct, [
                   {<<"params">>, Params},
                   {<<"id">>, null},
                   {<<"method">>, Method} 
                  ]} ->
-            %error_logger:info_msg("Got method: ~p with paarams ~p~n", [Method, Params]),
+            error_logger:info_msg("Got method: ~p with paarams ~p~n", [Method, Params]),
             call_method(Method, Params, State);
         Any ->
             error_logger:warning_msg("Got unexpected answer: ~p~n", [Any]),
@@ -162,8 +162,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 call_method(<<"mining.set_difficulty">>, [Diff], State) ->
     CDiff = 16#00000000FFFF0000000000000000000000000000000000000000000000000000 div Diff,
-    BTarget = <<CDiff:256/integer>>,
-    error_logger:info_msg("Target set to ~p for difficulty ~p~n", [BTarget, Diff]),
+    error_logger:info_msg("Difficulty set to ~p~n", [Diff]),
     {noreply, State#state{difficulty=CDiff}};
 call_method(<<"mining.notify">>, 
             [
