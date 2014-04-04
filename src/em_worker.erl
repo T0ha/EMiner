@@ -6,13 +6,13 @@
 -export([start_link/4]).
 
 %% gen_fsm callbacks
--export([init/1,
+-export([init/1, % {{{1
          working/2,
          handle_event/3,
          handle_sync_event/4,
          handle_info/3,
          terminate/3,
-         code_change/4]).
+         code_change/4]).  % }}}
 
 -record(state, {jid, block, nonce, target, ntime}).
 
@@ -29,7 +29,7 @@
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(JID, Block, Target, NTime) ->
+start_link(JID, Block, Target, NTime) ->  % {{{1
     gen_fsm:start_link( ?MODULE, [JID, Block, Target, NTime], []).
 
 %%%===================================================================
@@ -49,7 +49,7 @@ start_link(JID, Block, Target, NTime) ->
 %%                     {stop, StopReason}
 %% @end
 %%--------------------------------------------------------------------
-init([JID, Block, Target, NTime]) ->
+init([JID, Block, Target, NTime]) ->  % {{{1
     {ok, working, #state{jid=JID, block=Block, nonce = 0, target=Target, ntime=NTime}, 0}.
 
 %%--------------------------------------------------------------------
@@ -67,7 +67,7 @@ init([JID, Block, Target, NTime]) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-working(timeout, #state{block=Data, target=Target, nonce=Nonce, ntime=NTime, jid=JID} = State) ->
+working(timeout, #state{block=Data, target=Target, nonce=Nonce, ntime=NTime, jid=JID} = State) ->  % {{{1
     %error_logger:info_msg("Working on: ~p start ~p~n", [Data, now()]),
     case brute(Data, Target, Nonce) of
         {result, Result, Hash} ->
@@ -93,7 +93,7 @@ working(timeout, #state{block=Data, target=Target, nonce=Nonce, ntime=NTime, jid
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_event(_Event, StateName, State) ->
+handle_event(_Event, StateName, State) ->  % {{{1
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -112,7 +112,7 @@ handle_event(_Event, StateName, State) ->
 %%                   {stop, Reason, Reply, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_sync_event(_Event, _From, StateName, State) ->
+handle_sync_event(_Event, _From, StateName, State) ->  % {{{1
     Reply = ok,
     {reply, Reply, StateName, State}.
 
@@ -129,7 +129,7 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %%                   {stop, Reason, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(_Info, StateName, State) ->
+handle_info(_Info, StateName, State) ->  % {{{1
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -143,7 +143,7 @@ handle_info(_Info, StateName, State) ->
 %% @spec terminate(Reason, StateName, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
-terminate(_Reason, _StateName, _State) ->
+terminate(_Reason, _StateName, _State) ->  % {{{1
     ok.
 
 %%--------------------------------------------------------------------
@@ -155,18 +155,18 @@ terminate(_Reason, _StateName, _State) ->
 %%                   {ok, StateName, NewState}
 %% @end
 %%--------------------------------------------------------------------
-code_change(_OldVsn, StateName, State, _Extra) ->
+code_change(_OldVsn, StateName, State, _Extra) ->  % {{{1
     {ok, StateName, State}.
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 
-brute(_Data, _Target, Nonce) when Nonce > 16#ffffffff ->
+brute(_Data, _Target, Nonce) when Nonce > 16#ffffffff ->  % {{{1
     empty;
-brute(Data, Target, Nonce) when Nonce =< 16#ffffffff ->
-    if Nonce rem 32 == 0 ->
-           timer:sleep(1);
+brute(Data, Target, Nonce) when Nonce =< 16#ffffffff ->  % {{{1
+    if Nonce rem 128 == 0 ->
+           timer:sleep(2);
        true ->
            ok
     end,
