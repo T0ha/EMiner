@@ -22,9 +22,11 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 start_mining(JID, Block, Target, NTime) ->
+    MaxLoad = application:get_env(eminer, max_load, 1.0),
     {ok, N} = application:get_env(eminer, workers_number),
     Running = supervisor:which_children(?MODULE),
-    if N >= length(Running) ->
+    Load = cpu_sup:avg5() / 256,
+    if N >= length(Running), Load =< MaxLoad ->
            supervisor:start_child(?MODULE, [JID, Block, Target, NTime]);
        true ->
            ok
