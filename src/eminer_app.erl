@@ -12,6 +12,7 @@
 start(_StartType, _StartArgs) ->
     inets:start(),
     application:start(crypto),
+    application:start(sasl),
     application:start(os_mon),
     application:start(mochijson2),
     eminer_sup:start_link().

@@ -69,16 +69,25 @@ init([JID, Block, Target, NTime]) ->  % {{{1
 %%--------------------------------------------------------------------
 working(timeout, #state{block=Data, target=Target, nonce=Nonce, ntime=NTime, jid=JID} = State) ->  % {{{1
     %error_logger:info_msg("Working on: ~p start ~p~n", [Data, now()]),
-    case brute(Data, Target, Nonce) of
-        {result, Result, Hash} ->
-            error_logger:info_msg("Finished result ~p ~p~n", [Result, Hash]),
-            em_protocol_sup:found(JID, Result, NTime),
-            {stop, done, State};
-        empty ->
-            %error_logger:info_msg("Finished empty~p ~n", [now()]),
-            {stop, done, State}
-    end.
+    Fun = fun() ->
+                  case brute(Data, Target, Nonce) of
+                      {result, Result, Hash} ->
+                          error_logger:info_msg("Finished result ~p ~p~n", [Result, Hash]),
+                          em_protocol_sup:found(JID, Result, NTime);
+                      empty ->
+                          ok
+                  end
+          end,
+                  duration(Fun, State).
 
+duration(Fun, State) ->
+    Start = now(),
+    Fun(),
+    End = now(),
+    Duration = timer:now_diff(End, Start),
+    error_logger:info_msg("Work done in ~p msec~n", [Duration]),
+    timer:sleep(Duration),
+    {stop, done, State}.
 
 %%--------------------------------------------------------------------
 %% @private

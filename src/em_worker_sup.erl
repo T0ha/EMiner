@@ -26,9 +26,11 @@ start_mining(JID, Block, Target, NTime) ->
     {ok, N} = application:get_env(eminer, workers_number),
     Running = supervisor:which_children(?MODULE),
     Load = cpu_sup:avg5() / 256,
-    if N >= length(Running), Load =< MaxLoad ->
+    if Load =< MaxLoad ->
+           error_logger:info_msg("Load ~p max ~p starting~n", [Load, MaxLoad]),
            supervisor:start_child(?MODULE, [JID, Block, Target, NTime]);
        true ->
+           error_logger:info_msg("Load ~p max ~p not starting~n", [Load, MaxLoad]),
            ok
     end.
 

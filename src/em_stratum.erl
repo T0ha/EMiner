@@ -123,11 +123,11 @@ handle_info({tcp, Sock, Data}, #state{socket=Sock, id=Id} = State) ->
                   {<<"id">>, null},
                   {<<"method">>, Method} 
                  ]} ->
-            error_logger:info_msg("Got method: ~p with paarams ~p~n", [Method, Params]),
+            error_logger:info_msg("Got method: ~p with params ~n", [Method]),
             call_method(Method, Params, State);
         Any ->
             error_logger:warning_msg("Got unexpected answer: ~p~n", [Any]),
-            {stop, "wrong answer", State}
+            {noreply, State}
     end;
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -168,7 +168,6 @@ call_method(<<"mining.notify">>,
             [
              JID, PrevHash, Coinb1, Coinb2, MercleBranch, Version, NBits, NTime, Clean
             ], #state{extranonce=Extranonce1, extra2len=Extra2len, difficulty=Target} = State) ->
-    %error_logger:info_msg("~p",[<<Version/bytes, PrevHash/bytes, (em_utils:bin_to_hex(MercleRoot))/bytes, NTime/bytes, Nbits/bytes>>]),
     em_worker_sup:stop(Clean),
     em_worker_sup:start_mining(JID, em_utils:reverse(em_utils:hex_to_bin(em_utils:build_block(Version, PrevHash, Coinb1, Coinb2, Extranonce1, Extra2len, MercleBranch, NBits, NTime))), Target, NTime),
     {noreply, State};
