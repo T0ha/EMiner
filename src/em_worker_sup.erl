@@ -26,11 +26,18 @@ start_mining(JID, Block, Target, NTime) ->
     {ok, N} = application:get_env(eminer, workers_number),
     Running = supervisor:which_children(?MODULE),
     Load = cpu_sup:avg5() / 256,
-    if Load =< MaxLoad ->
+
+    if 
+        Load == 0.0, Running < N  ->
+           error_logger:info_msg("Load is absent running ~p threads of ~p starting~n", 
+                                 [Running, N]),
+           supervisor:start_child(?MODULE, [JID, Block, Target, NTime]);
+        Load =< MaxLoad ->
            error_logger:info_msg("Load ~p max ~p starting~n", [Load, MaxLoad]),
            supervisor:start_child(?MODULE, [JID, Block, Target, NTime]);
        true ->
-           error_logger:info_msg("Load ~p max ~p not starting~n", [Load, MaxLoad]),
+           error_logger:info_msg("Load ~p max ~p running ~p of ~p not starting~n", 
+                                 [Load, MaxLoad, Running, N]),
            ok
     end.
 
