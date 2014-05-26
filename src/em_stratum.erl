@@ -13,7 +13,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, {id, difficulty=1, socket, login, passwd, extranonce, extra2len}).
+-record(state, {id, difficulty=1, socket, host, port, login, passwd, extranonce, extra2len}).
 
 %%%===================================================================
 %%% API
@@ -45,9 +45,8 @@ start_link(Address, Port, Login, Passwd) ->
 %% @end
 %%--------------------------------------------------------------------
 init([ Address, Port, Login, Passwd ]) ->
-    {ok, Sock} = gen_tcp:connect(Address, Port, [{packet, line}, list, {reuseaddr, true}, {active, true}]),
-    gen_tcp:send(Sock, "{\"id\": 1, \"method\": \"mining.subscribe\", \"params\":[]}\n"),
-    {ok, #state{id=1, socket=Sock, login=Login, passwd=Passwd}}.
+    Timeout = application:get_env(eminer, start_timeout, 10000),
+    {ok, #state{id=1, host=Address, port=Port, login=Login, passwd=Passwd}, Timeout}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -129,6 +128,10 @@ handle_info({tcp, Sock, Data}, #state{socket=Sock, id=Id} = State) ->
             error_logger:warning_msg("Got unexpected answer: ~p~n", [Any]),
             {noreply, State}
     end;
+handle_info(timeout, #state{host=Address, port=Port} = State) ->
+    {ok, Sock} = gen_tcp:connect(Address, Port, [{packet, line}, list, {reuseaddr, true}, {active, true}]),
+    gen_tcp:send(Sock, "{\"id\": 1, \"method\": \"mining.subscribe\", \"params\":[]}\n"),
+    {noreply, State#state{id=1, socket=Sock}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
